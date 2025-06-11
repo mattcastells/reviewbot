@@ -1,0 +1,17 @@
+{
+  "name": "gitlab-review-bot",
+  "version": "1.0.0",
+  "main": "webhookServer.js",
+  "scripts": {
+    "start": "node webhookServer.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2"
+  }
+}
