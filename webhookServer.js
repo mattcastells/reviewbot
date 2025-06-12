@@ -1,4 +1,3 @@
-// webhookServer.js
 require('dotenv').config();
 const express = require('express');
 const { reviewDiffInline } = require('./reviewBot');
@@ -23,60 +22,76 @@ app.post('/webhook', async (req, res) => {
   console.log(`📦 Merge Request recibido: !${mrIid} en ${event.project.name}`);
 
   try {
-    const changesUrl = `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/changes`;
+    const diffUrl = `${event.project.web_url}/-/merge_requests/${mrIid}.diff`;
 
-    const changesResp = await fetch(changesUrl, {
+    const diffResp = await fetch(diffUrl, {
       headers: { 'PRIVATE-TOKEN': GITLAB_TOKEN }
     });
 
-    const changesData = await changesResp.json();
-    const diffs = changesData.changes || [];
-
-    // Unimos los diffs en un formato entendible
-    const fullDiff = diffs.map(file => {
-      return `diff --git a/${file.old_path} b/${file.new_path}\n${file.diff}`;
-    }).join("\n");
-
+    const diff = await diffResp.text();
     console.log("📄 Enviando diff al LLM...");
-    const suggestions = await reviewDiffInline(fullDiff);
 
-    if (suggestions.length === 0) {
-      // Fallback: comentario general
-      await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'PRIVATE-TOKEN': GITLAB_TOKEN
-        },
-        body: JSON.stringify({
-          body: `🤖 **Revisión automática del LLM:**\n\nNo se encontraron observaciones relevantes.`
-        })
-      });
-      console.log("💬 Comentario general publicado (sin sugerencias)");
-      return res.status(200).send("OK");
+    const inlineComments = await reviewDiffInline(diff);
+
+    // Comentario general
+    let generalMessage = "🤖 **Revisión automática del LLM:**\n\n";
+    if (inlineComments.length === 0) {
+      generalMessage += "No se encontraron sugerencias significativas para comentar.";
+    } else {
+      generalMessage += "Se encontraron sugerencias inline. Revisá los comentarios en el código.";
     }
 
-    // Comentarios inline
-    for (const s of suggestions) {
-      await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/discussions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'PRIVATE-TOKEN': GITLAB_TOKEN
-        },
-        body: JSON.stringify({
-          body: s.comment,
-          position: {
-            position_type: 'text',
-            base_sha: event.object_attributes.diff_refs.base_sha,
-            start_sha: event.object_attributes.diff_refs.start_sha,
-            head_sha: event.object_attributes.diff_refs.head_sha,
-            new_path: s.file,
-            new_line: s.line
-          }
-        })
+    await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'PRIVATE-TOKEN': GITLAB_TOKEN
+      },
+      body: JSON.stringify({ body: generalMessage })
+    });
+
+    console.log("💬 Comentario general publicado");
+
+    // Publicar comentarios inline
+    if (inlineComments.length > 0) {
+      const changesResp = await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/changes`, {
+        headers: { 'PRIVATE-TOKEN': GITLAB_TOKEN }
       });
-      console.log(`✅ Comentario inline publicado en ${s.file}:${s.line}`);
+      const changes = await changesResp.json();
+
+      const baseSha = changes.diff_refs?.base_sha;
+      const headSha = changes.diff_refs?.head_sha;
+
+      if (!baseSha || !headSha) {
+        throw new Error("diff_refs.base_sha o head_sha no están definidos");
+      }
+
+      for (const comment of inlineComments) {
+        try {
+          await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/discussions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'PRIVATE-TOKEN': GITLAB_TOKEN
+            },
+            body: JSON.stringify({
+              body: comment.comment,
+              position: {
+                position_type: "text",
+                base_sha: baseSha,
+                head_sha: headSha,
+                start_sha: baseSha,
+                new_path: comment.file,
+                new_line: comment.line
+              }
+            })
+          });
+        } catch (err) {
+          console.error(`⚠️ Falló comentario inline en ${comment.file}:${comment.line}:`, err.message);
+        }
+      }
+
+      console.log("✅ Comentarios inline publicados");
     }
 
     res.status(200).send("OK");
