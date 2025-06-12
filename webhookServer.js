@@ -12,17 +12,17 @@ app.post('/webhook', async (req, res) => {
   const event = req.body;
 
   if (event.object_kind !== 'merge_request') {
-    return res.status(200).send("Evento no soportado");
+    return res.status(200).send("Event not supported");
   }
 
   const mr = event.object_attributes;
   const projectId = event.project.id;
   const mrIid = mr.iid;
 
-  console.log(`📦 Merge Request recibido: !${mrIid} en ${event.project.name}`);
+  console.log(`📦 Merge Request received: !${mrIid} in ${event.project.name}`);
 
   try {
-    // ✅ Usar la API de GitLab para obtener los cambios reales
+    // ✅ Use the GitLab API to get the real changes
     const diffApiUrl = `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/changes`;
 
     const diffResp = await fetch(diffApiUrl, {
@@ -35,7 +35,7 @@ app.post('/webhook', async (req, res) => {
       .map(change => `diff --git a/${change.old_path} b/${change.new_path}\n${change.diff}`)
       .join('\n\n');
 
-    console.log("📄 DIFF real recibido:\n", diff);
+    console.log("📄 Real DIFF received:\n", diff);
 
     const review = await reviewDiff(diff);
 
@@ -46,19 +46,19 @@ app.post('/webhook', async (req, res) => {
         'PRIVATE-TOKEN': GITLAB_TOKEN
       },
       body: JSON.stringify({
-        body: `🤖 **Revisión automática del LLM:**\n\n${review}`
+        body: `🤖 **Automatic LLM Review:**\n\n${review}`
       })
     });
 
-    console.log("✅ Comentario publicado correctamente");
+    console.log("✅ Comment posted successfully");
     res.status(200).send("OK");
   } catch (err) {
-    console.error("❌ Error al procesar el webhook:", err.message || err);
-    res.status(500).send(err.message || "Error interno");
+    console.error("❌ Error processing webhook:", err.message || err);
+    res.status(500).send(err.message || "Internal error");
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
+  console.log(`🚀 Server listening at http://localhost:${PORT}`);
 });

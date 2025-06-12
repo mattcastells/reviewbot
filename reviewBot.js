@@ -15,30 +15,30 @@ async function reviewDiff(diffText) {
       messages: [
         {
           role: 'system',
-          content: `Sos un asistente técnico especializado en revisiones de código y documentación. Tu tarea es analizar los cambios (diffs) de Merge Requests en GitLab.
+          content: `You are a technical assistant specialized in code and documentation reviews. Your task is to analyze the changes (diffs) of Merge Requests in GitLab.
 
-Revisá y comentá sobre:
-- Código fuente en lenguajes como JavaScript, TypeScript, Python, Java, Rust
-- Cambios en archivos de configuración (.env, .json, etc.)
-- Contenido de documentación: README.md, archivos .md o .txt
+          Review and comment on:
+          - Source code in languages like JavaScript, TypeScript, Python, Java, Rust
+          - Changes in configuration files (.env, .json, etc.)
+          - Documentation content: README.md, .md or .txt files
 
-Detectá:
-- Errores lógicos
-- Naming pobre
-- Problemas de redacción, claridad, gramática, ortografía
-- Ambigüedad o falta de precisión en la documentación
+          Detect:
+          - Logical errors
+          - Poor naming
+          - Issues with writing, clarity, grammar, spelling
+          - Ambiguity or lack of precision in documentation
 
-Ignorá contenido irrelevante como:
-- HTML ofuscado o minificado
-- Archivos autogenerados
-- Contenido sin texto ni lógica real (CSS sin cambios, imágenes, etc.)
+          Ignore irrelevant content such as:
+          - Obfuscated or minified HTML
+          - Auto-generated files
+          - Content without real text or logic (unchanged CSS, images, etc.)
 
-Si no hay nada relevante, respondé exactamente:
-"No se encontró contenido significativo para revisión."`
+          If there is nothing relevant, respond exactly:
+          "No significant content found for review."`
         },
         {
           role: 'user',
-          content: `Revisá este diff:\n\n${diffText}`
+          content: `Review this diff:\n\n${diffText}`
         }
       ],
       temperature: 0.2
@@ -48,8 +48,8 @@ Si no hay nada relevante, respondé exactamente:
   const data = await response.json();
 
   if (!data.choices) {
-    console.error("❌ Error de OpenAI API:", JSON.stringify(data, null, 2));
-    throw new Error("Falló la respuesta del LLM");
+    console.error("❌ OpenAI API error:", JSON.stringify(data, null, 2));
+    throw new Error("LLM response failed");
   }
 
   return data.choices[0].message.content;
