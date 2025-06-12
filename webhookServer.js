@@ -33,6 +33,7 @@ app.post('/webhook', async (req, res) => {
     }
 
     const diffData = await diffResp.json();
+
     const combinedDiff = diffData.changes.map(change => {
       return `diff --git a/${change.old_path} b/${change.new_path}\n${change.diff}`;
     }).join('\n');
@@ -56,15 +57,18 @@ app.post('/webhook', async (req, res) => {
     }
 
     let summaryText = "🤖 **Revisión automática del LLM**\n\n";
+
     if (successCount > 0) {
       summaryText += `✅ Se publicaron **${successCount}** comentario(s) inline.\n\n`;
     }
+
     if (failedComments.length > 0) {
       summaryText += `📝 **Comentarios generales:**\n`;
       for (const c of failedComments) {
         summaryText += `- **${c.file}:${c.line}** – ${c.comment}\n`;
       }
     }
+
     if (successCount === 0 && failedComments.length === 0) {
       summaryText += "No se encontraron sugerencias relevantes.";
     }
@@ -92,6 +96,7 @@ async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha,
   };
 
   console.log(`🔍 Publicando inline en ${suggestion.file}:${suggestion.line}`);
+  console.log("🧾 Payload:", JSON.stringify(body, null, 2));
 
   const resp = await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/discussions`, {
     method: 'POST',
