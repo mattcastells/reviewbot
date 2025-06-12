@@ -8,11 +8,9 @@ app.use(express.json());
 
 const GITLAB_TOKEN = process.env.GITLAB_TOKEN;
 
-// Endpoint del webhook de GitLab
 app.post('/webhook', async (req, res) => {
   const event = req.body;
 
-  // Validamos que sea un MR
   if (event.object_kind !== 'merge_request') {
     return res.status(200).send("Evento no soportado");
   }
@@ -24,7 +22,6 @@ app.post('/webhook', async (req, res) => {
   console.log(`📦 Merge Request recibido: !${mrIid} en ${event.project.name}`);
 
   try {
-    // Obtener diff completo del MR
     const diffUrl = `${event.project.web_url}/-/merge_requests/${mrIid}.diff`;
 
     const diffResp = await fetch(diffUrl, {
@@ -35,8 +32,7 @@ app.post('/webhook', async (req, res) => {
 
     const review = await reviewDiff(diff);
 
-    // Comentar en el MR usando la API de GitLab
-    const commentResp = await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
+    await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -50,8 +46,8 @@ app.post('/webhook', async (req, res) => {
     console.log("✅ Comentario publicado correctamente");
     res.status(200).send("OK");
   } catch (err) {
-    console.error("❌ Error al procesar el webhook:", err);
-    res.status(500).send("Error");
+    console.error("❌ Error al procesar el webhook:", err.message || err);
+    res.status(500).send(err.message || "Error interno");
   }
 });
 
