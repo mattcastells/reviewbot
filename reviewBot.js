@@ -1,9 +1,10 @@
+// reviewBot.js
 require('dotenv').config();
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-async function reviewDiff(diffText) {
+async function reviewDiffInline(diffText) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -15,30 +16,18 @@ async function reviewDiff(diffText) {
       messages: [
         {
           role: 'system',
-          content: `Sos un asistente técnico especializado en revisiones de código y documentación. Tu tarea es analizar los cambios (diffs) de Merge Requests en GitLab.
+          content: `Sos un asistente de revisión de código que devuelve sugerencias en formato JSON para comentarios inline. Solo analizá diffs en lenguajes como JavaScript, TypeScript, Python, Java o Rust. Ignorá HTML, contenido ofuscado o autogenerado. Formato esperado:
 
-Revisá y comentá sobre:
-- Código fuente en lenguajes como JavaScript, TypeScript, Python, Java, Rust
-- Cambios en archivos de configuración (.env, .json, etc.)
-- Contenido de documentación: README.md, archivos .md o .txt
-
-Detectá:
-- Errores lógicos
-- Naming pobre
-- Problemas de redacción, claridad, gramática, ortografía
-- Ambigüedad o falta de precisión en la documentación
-
-Ignorá contenido irrelevante como:
-- HTML ofuscado o minificado
-- Archivos autogenerados
-- Contenido sin texto ni lógica real (CSS sin cambios, imágenes, etc.)
-
-Si no hay nada relevante, respondé exactamente:
-"No se encontró contenido significativo para revisión."`
+[
+  { "file": "src/file.ts", "line": 10, "comment": "Este nombre podría ser más descriptivo." },
+  ...
+]`
         },
         {
           role: 'user',
-          content: `Revisá este diff:\n\n${diffText}`
+          content: `Revisá este diff:
+
+${diffText}`
         }
       ],
       temperature: 0.2
@@ -52,7 +41,12 @@ Si no hay nada relevante, respondé exactamente:
     throw new Error("Falló la respuesta del LLM");
   }
 
-  return data.choices[0].message.content;
+  try {
+    return JSON.parse(data.choices[0].message.content);
+  } catch (e) {
+    console.error("❌ Respuesta del LLM no es JSON:", data.choices[0].message.content);
+    return [];
+  }
 }
 
-module.exports = { reviewDiff };
+module.exports = { reviewDiffInline };
