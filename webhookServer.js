@@ -48,6 +48,8 @@ app.post('/webhook', async (req, res) => {
     const { base_sha, head_sha, start_sha } = diffData.diff_refs;
 
     let successCount = 0;
+    let failedComments = [];
+    
     for (const suggestion of suggestions) {
       try {
         // 🔧 Validar que la línea existe en el diff
@@ -56,27 +58,41 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
         
-        await postInlineComment(projectId, mrIid, suggestion, base_sha, head_sha, start_sha);
+        const lineCode = getLineCode(suggestion, fileLineMap);
+        await postInlineComment(projectId, mrIid, suggestion, base_sha, head_sha, start_sha, lineCode);
         successCount++;
       } catch (err) {
         console.error(`❌ Error publicando comentario inline en ${suggestion.file}:${suggestion.line}:`, err.message || err);
         
-        // 🔧 Intentar como comentario general si falla el inline
-        try {
-          const fallbackText = `**${suggestion.file}:${suggestion.line}** - ${suggestion.comment}`;
-          await postGeneralComment(projectId, mrIid, fallbackText);
-          console.log(`✅ Publicado como comentario general: ${suggestion.file}:${suggestion.line}`);
-        } catch (fallbackErr) {
-          console.error(`❌ Error en fallback:`, fallbackErr.message);
-        }
+        // 🔧 Guardar para el resumen en lugar de publicar individual
+        failedComments.push({
+          file: suggestion.file,
+          line: suggestion.line,
+          comment: suggestion.comment
+        });
       }
     }
 
-    const summary = successCount > 0
-      ? `🤖 Revisión automática del LLM:\n\nSe publicaron ${successCount} comentario(s) inline en el código.`
-      : "🤖 Revisión automática del LLM:\n\nNo se encontraron comentarios relevantes.";
+    // 🔧 Crear un solo comentario resumen
+    let summaryText = "🤖 **Revisión automática del LLM**\n\n";
+    
+    if (successCount > 0) {
+      summaryText += `✅ Se publicaron **${successCount}** comentario(s) inline en el código.\n\n`;
+    }
+    
+    if (failedComments.length > 0) {
+      summaryText += `📝 **Comentarios adicionales:**\n\n`;
+      failedComments.forEach(comment => {
+        summaryText += `- **${comment.file}:${comment.line}** - ${comment.comment}\n`;
+      });
+      summaryText += "\n";
+    }
+    
+    if (successCount === 0 && failedComments.length === 0) {
+      summaryText += "No se encontraron comentarios relevantes.";
+    }
 
-    await postGeneralComment(projectId, mrIid, summary);
+    await postGeneralComment(projectId, mrIid, summaryText);
 
     return res.status(200).send("OK");
   } catch (err) {
@@ -85,20 +101,23 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// 🔧 Nueva función: Crear mapa de líneas modificadas por archivo
+// 🔧 Nueva función: Crear mapa de líneas modificadas con line_codes
 function createFileLineMap(changes) {
   const fileLineMap = {};
   
   changes.forEach(change => {
     const filePath = change.new_path || change.old_path;
-    fileLineMap[filePath] = new Set();
+    fileLineMap[filePath] = {
+      lines: new Set(),
+      lineCodes: new Map() // Mapea número de línea -> line_code
+    };
     
     if (change.diff) {
       const lines = change.diff.split('\n');
       let newLineNumber = 0;
       let oldLineNumber = 0;
       
-      lines.forEach(line => {
+      lines.forEach((line, index) => {
         if (line.startsWith('@@')) {
           // Extraer números de línea del header
           const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
@@ -107,15 +126,17 @@ function createFileLineMap(changes) {
             newLineNumber = parseInt(match[2]);
           }
         } else if (line.startsWith('+')) {
-          // Línea añadida
-          fileLineMap[filePath].add(newLineNumber);
+          // Línea añadida - generar line_code
+          const lineCode = generateLineCode(change.new_path, oldLineNumber, newLineNumber);
+          fileLineMap[filePath].lines.add(newLineNumber);
+          fileLineMap[filePath].lineCodes.set(newLineNumber, lineCode);
           newLineNumber++;
         } else if (line.startsWith('-')) {
           // Línea eliminada
           oldLineNumber++;
         } else if (!line.startsWith('\\')) {
           // Línea sin cambios
-          fileLineMap[filePath].add(newLineNumber);
+          fileLineMap[filePath].lines.add(newLineNumber);
           newLineNumber++;
           oldLineNumber++;
         }
@@ -124,6 +145,13 @@ function createFileLineMap(changes) {
   });
   
   return fileLineMap;
+}
+
+// 🔧 Generar line_code para GitLab
+function generateLineCode(filePath, oldLine, newLine) {
+  const hash = require('crypto').createHash('sha1');
+  hash.update(`${filePath}:${oldLine}:${newLine}`);
+  return hash.digest('hex').substring(0, 10) + `_${newLine}_${newLine}`;
 }
 
 // 🔧 Nueva función: Validar que la línea existe en el diff
@@ -136,7 +164,19 @@ function validateLineInDiff(suggestion, fileLineMap) {
     return false;
   }
   
-  return fileLineMap[filePath].has(lineNumber);
+  return fileLineMap[filePath].lines.has(lineNumber);
+}
+
+// 🔧 Obtener line_code para una línea específica
+function getLineCode(suggestion, fileLineMap) {
+  const filePath = suggestion.file;
+  const lineNumber = suggestion.line;
+  
+  if (!fileLineMap[filePath]) {
+    return null;
+  }
+  
+  return fileLineMap[filePath].lineCodes.get(lineNumber);
 }
 
 async function postGeneralComment(projectId, mrIid, text) {
@@ -157,7 +197,7 @@ async function postGeneralComment(projectId, mrIid, text) {
   console.log("💬 Comentario general publicado");
 }
 
-async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha, startSha) {
+async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha, startSha, lineCode) {
   const body = {
     body: suggestion.comment,
     position: {
@@ -166,13 +206,15 @@ async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha,
       head_sha: headSha,
       start_sha: startSha,
       new_path: suggestion.file,
-      new_line: suggestion.line
+      new_line: suggestion.line,
+      line_code: lineCode // 🔧 Agregar line_code requerido
     }
   };
 
   console.log(`🔍 Intentando comentario inline:`, {
     file: suggestion.file,
     line: suggestion.line,
+    lineCode: lineCode,
     shas: { baseSha, headSha, startSha }
   });
 
