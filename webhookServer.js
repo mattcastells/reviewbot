@@ -42,9 +42,17 @@ app.post('/webhook', async (req, res) => {
 
     const { base_sha, head_sha, start_sha } = diffData.diff_refs;
 
-    await Promise.all(suggestions.map(s =>
-      postInlineComment(projectId, mrIid, s, base_sha, head_sha, start_sha)
-    ));
+    // Log para depuración
+    console.log("🔎 Sugerencias generadas:", suggestions);
+
+    // Publicar comentarios inline y mostrar errores si ocurren
+    await Promise.all(suggestions.map(async (s) => {
+      try {
+        await postInlineComment(projectId, mrIid, s, base_sha, head_sha, start_sha);
+      } catch (err) {
+        console.error(`❌ Error publicando comentario inline en ${s.file}:${s.line}:`, err.message || err);
+      }
+    }));
 
     await postGeneralComment(projectId, mrIid, "🤖 Revisión automática del LLM:\n\nSe publicaron comentarios inline en el código.");
 
@@ -56,7 +64,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 async function postGeneralComment(projectId, mrIid, text) {
-  await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
+  const resp = await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -64,10 +72,20 @@ async function postGeneralComment(projectId, mrIid, text) {
     },
     body: JSON.stringify({ body: text })
   });
-  console.log("💬 Comentario general publicado");
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    console.error("❌ Error publicando comentario general:", errorText);
+  } else {
+    console.log("💬 Comentario general publicado");
+  }
 }
 
 async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha, startSha) {
+  // Validar datos antes de enviar
+  if (!suggestion.file || !suggestion.line || !suggestion.comment) {
+    throw new Error("Sugerencia inválida: " + JSON.stringify(suggestion));
+  }
+
   const body = {
     body: suggestion.comment,
     position: {
@@ -80,7 +98,7 @@ async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha,
     }
   };
 
-  await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/discussions`, {
+  const resp = await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/discussions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -88,6 +106,11 @@ async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha,
     },
     body: JSON.stringify(body)
   });
+
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    throw new Error(errorText);
+  }
 
   console.log(`💬 Comentario inline en ${suggestion.file}:${suggestion.line}`);
 }
