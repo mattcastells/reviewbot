@@ -22,15 +22,20 @@ app.post('/webhook', async (req, res) => {
   console.log(`📦 Merge Request recibido: !${mrIid} en ${event.project.name}`);
 
   try {
-    const diffUrl = `${event.project.web_url}/-/merge_requests/${mrIid}.diff`;
+    // ✅ Usar la API de GitLab para obtener los cambios reales
+    const diffApiUrl = `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/changes`;
 
-    const diffResp = await fetch(diffUrl, {
+    const diffResp = await fetch(diffApiUrl, {
       headers: { 'PRIVATE-TOKEN': GITLAB_TOKEN }
     });
 
-    const diff = await diffResp.text();
+    const diffJson = await diffResp.json();
 
-    console.log("📄 DIFF recibido:\n", diff); // 👈 LOG NUEVO PARA DEBUG
+    const diff = diffJson.changes
+      .map(change => `diff --git a/${change.old_path} b/${change.new_path}\n${change.diff}`)
+      .join('\n\n');
+
+    console.log("📄 DIFF real recibido:\n", diff);
 
     const review = await reviewDiff(diff);
 
