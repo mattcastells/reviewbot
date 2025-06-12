@@ -31,6 +31,14 @@ app.post('/webhook', async (req, res) => {
 
     const diffJson = await diffResp.json();
 
+    // Log the full response for debugging
+    console.log("🔎 GitLab API response:", JSON.stringify(diffJson, null, 2));
+
+    if (!diffJson.changes || !Array.isArray(diffJson.changes)) {
+      console.error("❌ GitLab API error or unexpected response:", JSON.stringify(diffJson, null, 2));
+      return res.status(500).send("GitLab API error or unexpected response");
+    }
+
     const diff = diffJson.changes
       .map(change => `diff --git a/${change.old_path} b/${change.new_path}\n${change.diff}`)
       .join('\n\n');
