@@ -1,4 +1,3 @@
-// reviewBot.js
 require('dotenv').config();
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -16,16 +15,28 @@ async function reviewDiffInline(diffText) {
       messages: [
         {
           role: 'system',
-          content: `Sos un asistente de revisión de código que devuelve sugerencias en formato JSON para comentarios inline. Solo analizá diffs en lenguajes como JavaScript, TypeScript, Python, Java o Rust. Ignorá HTML, contenido ofuscado o autogenerado. Formato esperado:
+          content: `Sos un asistente de revisión de código que devuelve sugerencias en formato JSON para comentarios inline. 
 
+IMPORTANTE: Solo devolvé comentarios para líneas que fueron MODIFICADAS o AÑADIDAS en el diff (líneas que empiezan con + en el diff).
+
+Analizá solo diffs en lenguajes como JavaScript, TypeScript, Python, Java o Rust. Ignorá HTML, contenido ofuscado o autogenerado. 
+
+Para cada sugerencia, asegurate de que:
+1. El archivo existe en el diff
+2. La línea corresponde a una línea nueva/modificada (+ en el diff)
+3. El número de línea es correcto según el diff
+
+Formato esperado:
 [
   { "file": "src/file.ts", "line": 10, "comment": "Este nombre podría ser más descriptivo." },
   ...
-]`
+]
+
+Si no hay comentarios relevantes, devolvé un array vacío: []`
         },
         {
           role: 'user',
-          content: `Revisá este diff:\n\n${diffText}`
+          content: `Revisá este diff y devolvé SOLO comentarios para líneas que fueron añadidas o modificadas:\n\n${diffText}`
         }
       ],
       temperature: 0.2
@@ -41,15 +52,28 @@ async function reviewDiffInline(diffText) {
 
   const rawContent = data.choices[0].message.content.trim();
 
-  // 🔧 Removemos los backticks y cualquier markdown que rodee el JSON
+  // 🔧 Mejor limpieza del JSON
   const cleaned = rawContent
-    .replace(/^```json\s*/, '')   // elimina ```json inicial si existe
-    .replace(/^```\s*/, '')       // elimina ``` inicial sin tipo
-    .replace(/```$/, '')          // elimina ``` final
+    .replace(/^```json\s*/, '')   
+    .replace(/^```\s*/, '')       
+    .replace(/```$/, '')          
     .trim();
 
   try {
-    return JSON.parse(cleaned);
+    const suggestions = JSON.parse(cleaned);
+    
+    // 🔧 Validar estructura de cada sugerencia
+    const validSuggestions = suggestions.filter(suggestion => {
+      if (!suggestion.file || !suggestion.line || !suggestion.comment) {
+        console.warn(`⚠️ Sugerencia inválida ignorada:`, suggestion);
+        return false;
+      }
+      return true;
+    });
+    
+    console.log(`✅ ${validSuggestions.length} sugerencias válidas de ${suggestions.length} total`);
+    return validSuggestions;
+    
   } catch (e) {
     console.error("❌ No se pudo parsear el JSON devuelto:", rawContent);
     return [];
