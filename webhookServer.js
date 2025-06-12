@@ -35,26 +35,25 @@ app.post('/webhook', async (req, res) => {
 
     const suggestions = await reviewDiffInline(combinedDiff);
 
-    if (!suggestions || suggestions.length === 0) {
-      await postGeneralComment(projectId, mrIid, "🤖 Revisión automática del LLM:\n\nNo se encontraron comentarios relevantes.");
-      return res.status(200).send("Sin sugerencias");
-    }
+    console.log("🔎 Sugerencias generadas:", suggestions);
 
     const { base_sha, head_sha, start_sha } = diffData.diff_refs;
 
-    // Log para depuración
-    console.log("🔎 Sugerencias generadas:", suggestions);
-
-    // Publicar comentarios inline y mostrar errores si ocurren
-    await Promise.all(suggestions.map(async (s) => {
+    let successCount = 0;
+    for (const suggestion of suggestions) {
       try {
-        await postInlineComment(projectId, mrIid, s, base_sha, head_sha, start_sha);
+        await postInlineComment(projectId, mrIid, suggestion, base_sha, head_sha, start_sha);
+        successCount++;
       } catch (err) {
-        console.error(`❌ Error publicando comentario inline en ${s.file}:${s.line}:`, err.message || err);
+        console.error(`❌ Error publicando comentario inline en ${suggestion.file}:${suggestion.line}:`, err.message || err);
       }
-    }));
+    }
 
-    await postGeneralComment(projectId, mrIid, "🤖 Revisión automática del LLM:\n\nSe publicaron comentarios inline en el código.");
+    const summary = successCount > 0
+      ? `🤖 Revisión automática del LLM:\n\nSe publicaron ${successCount} comentario(s) inline en el código.`
+      : "🤖 Revisión automática del LLM:\n\nNo se encontraron comentarios relevantes.";
+
+    await postGeneralComment(projectId, mrIid, summary);
 
     return res.status(200).send("OK");
   } catch (err) {
@@ -64,7 +63,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 async function postGeneralComment(projectId, mrIid, text) {
-  const resp = await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
+  await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -72,20 +71,10 @@ async function postGeneralComment(projectId, mrIid, text) {
     },
     body: JSON.stringify({ body: text })
   });
-  if (!resp.ok) {
-    const errorText = await resp.text();
-    console.error("❌ Error publicando comentario general:", errorText);
-  } else {
-    console.log("💬 Comentario general publicado");
-  }
+  console.log("💬 Comentario general publicado");
 }
 
 async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha, startSha) {
-  // Validar datos antes de enviar
-  if (!suggestion.file || !suggestion.line || !suggestion.comment) {
-    throw new Error("Sugerencia inválida: " + JSON.stringify(suggestion));
-  }
-
   const body = {
     body: suggestion.comment,
     position: {
@@ -108,8 +97,8 @@ async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha,
   });
 
   if (!resp.ok) {
-    const errorText = await resp.text();
-    throw new Error(errorText);
+    const errorData = await resp.json();
+    throw new Error(JSON.stringify(errorData));
   }
 
   console.log(`💬 Comentario inline en ${suggestion.file}:${suggestion.line}`);
