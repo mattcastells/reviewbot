@@ -30,6 +30,8 @@ app.post('/webhook', async (req, res) => {
 
     const diff = await diffResp.text();
 
+    console.log("📄 DIFF recibido:\n", diff); // 👈 LOG NUEVO PARA DEBUG
+
     const review = await reviewDiff(diff);
 
     await fetch(`https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, {
