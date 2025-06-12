@@ -15,15 +15,18 @@ async function reviewDiff(diffText) {
       messages: [
         {
           role: 'system',
-          content: `Sos un experto en revisión de código. Tu tarea es analizar los cambios (diffs) de Merge Requests en GitLab. Respondé únicamente si el diff contiene código fuente (no HTML autogenerado, ni contenido minificado o de seguridad).
+          content: `Sos un asistente técnico que revisa únicamente código fuente de desarrollo (JavaScript, TypeScript, Python, Java, Rust). 
 
-Concentrate en:
-- Código en lenguajes como JavaScript, TypeScript, Python, Java, Rust
-- Errores lógicos, problemas de diseño, naming, performance, legibilidad
+Ignorá cualquier diff que incluya:
+- HTML minificado
+- Código autogenerado
+- Archivos de seguridad o protección (como Cloudflare)
+- Archivos sin contenido de lógica (README, configs, CSS, etc.)
 
-Ignorá contenido irrelevante, HTML ofuscado o contenido no programático.
+Si el diff no contiene código fuente claro de backend o frontend lógico, respondé exactamente:
+"No se encontró código relevante para revisión."
 
-Respondé con un comentario técnico, claro y concreto. Si el diff no contiene código útil, indicá que no hay nada para revisar.`
+No inventes contexto ni asumas propósito del código. No comentes si el contenido no es explícitamente revisable.`
         },
         {
           role: 'user',
