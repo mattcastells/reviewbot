@@ -25,9 +25,7 @@ async function reviewDiffInline(diffText) {
         },
         {
           role: 'user',
-          content: `Revisá este diff:
-
-${diffText}`
+          content: `Revisá este diff:\n\n${diffText}`
         }
       ],
       temperature: 0.2
@@ -41,10 +39,19 @@ ${diffText}`
     throw new Error("Falló la respuesta del LLM");
   }
 
+  const rawContent = data.choices[0].message.content.trim();
+
+  // 🔧 Removemos los backticks y cualquier markdown que rodee el JSON
+  const cleaned = rawContent
+    .replace(/^```json\s*/, '')   // elimina ```json inicial si existe
+    .replace(/^```\s*/, '')       // elimina ``` inicial sin tipo
+    .replace(/```$/, '')          // elimina ``` final
+    .trim();
+
   try {
-    return JSON.parse(data.choices[0].message.content);
+    return JSON.parse(cleaned);
   } catch (e) {
-    console.error("❌ Respuesta del LLM no es JSON:", data.choices[0].message.content);
+    console.error("❌ No se pudo parsear el JSON devuelto:", rawContent);
     return [];
   }
 }
