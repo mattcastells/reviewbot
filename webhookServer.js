@@ -23,14 +23,19 @@ app.post('/webhook', async (req, res) => {
   console.log("📄 Enviando diff al LLM...");
 
   try {
-    const diffUrl = `${event.project.web_url}/-/merge_requests/${mrIid}.diff`;
+    const diffUrl = `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/changes`;
+
     const diffResp = await fetch(diffUrl, {
       headers: { 'PRIVATE-TOKEN': GITLAB_TOKEN }
     });
 
-    const diffText = await diffResp.text();
+    const diffData = await diffResp.json();
 
-    const suggestions = await reviewDiffInline(diffText);
+    const combinedDiff = diffData.changes.map(change => {
+      return `diff --git a/${change.old_path} b/${change.new_path}\n${change.diff}`;
+    }).join('\n');
+
+    const suggestions = await reviewDiffInline(combinedDiff);
 
     if (!suggestions || suggestions.length === 0) {
       await postGeneralComment(projectId, mrIid, "🤖 Revisión automática del LLM:\n\nNo se encontraron comentarios relevantes.");
