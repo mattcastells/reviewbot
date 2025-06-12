@@ -59,6 +59,16 @@ app.post('/webhook', async (req, res) => {
         }
         
         const lineCode = getLineCode(suggestion, fileLineMap);
+        if (!lineCode) {
+          console.warn(`⚠️ No se pudo generar line_code para ${suggestion.file}:${suggestion.line}, saltando...`);
+          failedComments.push({
+            file: suggestion.file,
+            line: suggestion.line,
+            comment: suggestion.comment
+          });
+          continue;
+        }
+        
         await postInlineComment(projectId, mrIid, suggestion, base_sha, head_sha, start_sha, lineCode);
         successCount++;
       } catch (err) {
@@ -101,7 +111,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// 🔧 Nueva función: Crear mapa de líneas modificadas con line_codes
+// 🔧 Función mejorada: Crear mapa de líneas modificadas con line_codes
 function createFileLineMap(changes) {
   const fileLineMap = {};
   
@@ -109,36 +119,46 @@ function createFileLineMap(changes) {
     const filePath = change.new_path || change.old_path;
     fileLineMap[filePath] = {
       lines: new Set(),
-      lineCodes: new Map() // Mapea número de línea -> line_code
+      lineCodes: new Map(), // Mapea número de línea -> line_code
+      oldLines: new Map(),  // Mapea número de línea nueva -> línea vieja
+      addedLines: new Set() // Solo líneas añadidas
     };
     
     if (change.diff) {
       const lines = change.diff.split('\n');
       let newLineNumber = 0;
       let oldLineNumber = 0;
+      let inHunk = false;
       
       lines.forEach((line, index) => {
         if (line.startsWith('@@')) {
           // Extraer números de línea del header
           const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
           if (match) {
-            oldLineNumber = parseInt(match[1]);
-            newLineNumber = parseInt(match[2]);
+            oldLineNumber = parseInt(match[1]) - 1; // -1 porque se incrementa antes de usar
+            newLineNumber = parseInt(match[2]) - 1; // -1 porque se incrementa antes de usar
+            inHunk = true;
           }
-        } else if (line.startsWith('+')) {
-          // Línea añadida - generar line_code
-          const lineCode = generateLineCode(change.new_path, oldLineNumber, newLineNumber);
+        } else if (inHunk && line.startsWith('+') && !line.startsWith('+++')) {
+          // Línea añadida
+          newLineNumber++;
+          const lineCode = generateLineCode(filePath, change, oldLineNumber, newLineNumber);
           fileLineMap[filePath].lines.add(newLineNumber);
           fileLineMap[filePath].lineCodes.set(newLineNumber, lineCode);
-          newLineNumber++;
-        } else if (line.startsWith('-')) {
+          fileLineMap[filePath].addedLines.add(newLineNumber);
+          
+          console.log(`➕ Línea añadida en ${filePath}:${newLineNumber} -> lineCode: ${lineCode}`);
+        } else if (inHunk && line.startsWith('-') && !line.startsWith('---')) {
           // Línea eliminada
           oldLineNumber++;
-        } else if (!line.startsWith('\\')) {
-          // Línea sin cambios
-          fileLineMap[filePath].lines.add(newLineNumber);
+        } else if (inHunk && !line.startsWith('\\') && line !== '') {
+          // Línea sin cambios (contexto)
           newLineNumber++;
           oldLineNumber++;
+          const lineCode = generateLineCode(filePath, change, oldLineNumber, newLineNumber);
+          fileLineMap[filePath].lines.add(newLineNumber);
+          fileLineMap[filePath].lineCodes.set(newLineNumber, lineCode);
+          fileLineMap[filePath].oldLines.set(newLineNumber, oldLineNumber);
         }
       });
     }
@@ -147,11 +167,17 @@ function createFileLineMap(changes) {
   return fileLineMap;
 }
 
-// 🔧 Generar line_code para GitLab
-function generateLineCode(filePath, oldLine, newLine) {
-  const hash = require('crypto').createHash('sha1');
-  hash.update(`${filePath}:${oldLine}:${newLine}`);
-  return hash.digest('hex').substring(0, 10) + `_${newLine}_${newLine}`;
+// 🔧 Generar line_code más robusto para GitLab
+function generateLineCode(filePath, change, oldLine, newLine) {
+  // Usar el formato que GitLab espera
+  const crypto = require('crypto');
+  
+  // Crear un identificador único basado en el contenido del cambio
+  const changeId = `${change.old_path || ''}_${change.new_path || ''}_${oldLine}_${newLine}`;
+  const hash = crypto.createHash('sha1').update(changeId).digest('hex');
+  
+  // Formato de line_code de GitLab: hash_oldLine_newLine
+  return `${hash.substring(0, 8)}_${oldLine}_${newLine}`;
 }
 
 // 🔧 Nueva función: Validar que la línea existe en el diff
@@ -164,7 +190,11 @@ function validateLineInDiff(suggestion, fileLineMap) {
     return false;
   }
   
-  return fileLineMap[filePath].lines.has(lineNumber);
+  const hasLine = fileLineMap[filePath].lines.has(lineNumber);
+  console.log(`🔍 Validando ${filePath}:${lineNumber} -> ${hasLine ? 'VÁLIDA' : 'NO VÁLIDA'}`);
+  console.log(`📋 Líneas disponibles para ${filePath}:`, Array.from(fileLineMap[filePath].lines).sort((a, b) => a - b));
+  
+  return hasLine;
 }
 
 // 🔧 Obtener line_code para una línea específica
@@ -173,10 +203,14 @@ function getLineCode(suggestion, fileLineMap) {
   const lineNumber = suggestion.line;
   
   if (!fileLineMap[filePath]) {
+    console.warn(`⚠️ Archivo ${filePath} no encontrado en fileLineMap`);
     return null;
   }
   
-  return fileLineMap[filePath].lineCodes.get(lineNumber);
+  const lineCode = fileLineMap[filePath].lineCodes.get(lineNumber);
+  console.log(`🔑 LineCode para ${filePath}:${lineNumber} -> ${lineCode}`);
+  
+  return lineCode;
 }
 
 async function postGeneralComment(projectId, mrIid, text) {
@@ -207,7 +241,7 @@ async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha,
       start_sha: startSha,
       new_path: suggestion.file,
       new_line: suggestion.line,
-      line_code: lineCode // 🔧 Agregar line_code requerido
+      line_code: lineCode
     }
   };
 
