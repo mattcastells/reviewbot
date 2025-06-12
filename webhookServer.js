@@ -24,11 +24,9 @@ app.post('/webhook', async (req, res) => {
 
   try {
     const diffUrl = `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/changes`;
-
     const diffResp = await fetch(diffUrl, {
       headers: { 'PRIVATE-TOKEN': GITLAB_TOKEN }
     });
-
     const diffData = await diffResp.json();
 
     const combinedDiff = diffData.changes.map(change => {
@@ -42,8 +40,10 @@ app.post('/webhook', async (req, res) => {
       return res.status(200).send("Sin sugerencias");
     }
 
+    const { base_sha, head_sha, start_sha } = diffData.diff_refs;
+
     await Promise.all(suggestions.map(s =>
-      postInlineComment(projectId, mrIid, s)
+      postInlineComment(projectId, mrIid, s, base_sha, head_sha, start_sha)
     ));
 
     await postGeneralComment(projectId, mrIid, "🤖 Revisión automática del LLM:\n\nSe publicaron comentarios inline en el código.");
@@ -67,11 +67,14 @@ async function postGeneralComment(projectId, mrIid, text) {
   console.log("💬 Comentario general publicado");
 }
 
-async function postInlineComment(projectId, mrIid, suggestion) {
+async function postInlineComment(projectId, mrIid, suggestion, baseSha, headSha, startSha) {
   const body = {
     body: suggestion.comment,
     position: {
       position_type: "text",
+      base_sha: baseSha,
+      head_sha: headSha,
+      start_sha: startSha,
       new_path: suggestion.file,
       new_line: suggestion.line
     }
