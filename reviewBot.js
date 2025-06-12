@@ -1,5 +1,5 @@
 require('dotenv').config();
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -15,7 +15,15 @@ async function reviewDiff(diffText) {
       messages: [
         {
           role: 'system',
-          content: `Sos un asistente de revisión de código para GitLab. Revisás diffs de Merge Requests en lenguajes como TypeScript, Java, Python y Rust. Señalás errores, mejoras de código, performance o readability. Respondé de forma técnica y breve.`
+          content: `Sos un experto en revisión de código. Tu tarea es analizar los cambios (diffs) de Merge Requests en GitLab. Respondé únicamente si el diff contiene código fuente (no HTML autogenerado, ni contenido minificado o de seguridad).
+
+Concentrate en:
+- Código en lenguajes como JavaScript, TypeScript, Python, Java, Rust
+- Errores lógicos, problemas de diseño, naming, performance, legibilidad
+
+Ignorá contenido irrelevante, HTML ofuscado o contenido no programático.
+
+Respondé con un comentario técnico, claro y concreto. Si el diff no contiene código útil, indicá que no hay nada para revisar.`
         },
         {
           role: 'user',
@@ -32,9 +40,8 @@ async function reviewDiff(diffText) {
     console.error("❌ Error de OpenAI API:", JSON.stringify(data, null, 2));
     throw new Error("Falló la respuesta del LLM");
   }
-  
+
   return data.choices[0].message.content;
-  
 }
 
 module.exports = { reviewDiff };
